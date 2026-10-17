@@ -19,27 +19,27 @@ async def company_webhook(request: Request):
     HubSpot Company Created/Updated Webhook Receiver
     """
     body = await request.json()
-    print("Received Company Webhook Event:", body)
+    print("Received Company Webhook Event:", body, flush=True)
     
     try:
-        # 1. Webhook payload se company ki details ya domain nikalna (HubSpot structure ke mutabik)
-        # 2. Forager API ke zariye role search ya company data fetch karna
+        # Extracting domain (Webhook's test via body)
+        domain = body.get("propertyValue", "openai.com")
+        
         forager_client = ForagerClient()
-        
-        # Example: Allowed job titles par 5 contacts discover karna
         settings = get_settings()
+
+        # Discovering 5 contacts from allowed job titles
         allowed_titles = settings.job_titles
+        role_title = allowed_titles[0] if allowed_titles else "engineer"
         
-        # Test/Demo domain (Jaise openai.com) par job titles search karna
-        # (Aap isko webhook ke incoming domain se bhi dynamic bana sakte hain)
         search_result = await forager_client.search_person_role(
-            role_title=allowed_titles[0] if allowed_titles else "engineer",
-            organization_domains=["openai.com"]
+            role_title=role_title,
+            organization_domains=[domain]
         )
-        print("Forager Search Result:", search_result)
+        print("Forager Search Success:", search_result, flush=True)
         
     except Exception as e:
-        print("Error processing company webhook:", str.e if hasattr(e, 'e') else str(e))
+        print("Error in company enrichment:", str(e), flush=True)
 
     return JSONResponse(status_code=status.HTTP_200_OK, content={"received": True})
 

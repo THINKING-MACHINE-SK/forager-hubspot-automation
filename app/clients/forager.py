@@ -11,17 +11,6 @@ class ForagerClient:
             "Content-Type": "application/json",
         }
 
-    async def search_company(self, domain: str) -> dict:
-        # Example endpoint based on Forager API docs structure
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.post(
-                f"{self.base_url}/datastorage/organization_search/",
-                headers=self.headers,
-                json={"domain": domain}
-            )
-            response.raise_for_status()
-            return response.json()
-
     async def search_person_role(self, role_title: str, organization_domains: list[str]) -> dict:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
@@ -31,6 +20,16 @@ class ForagerClient:
                     "role_title": role_title,
                     "organization_domains": organization_domains
                 }
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def lookup_work_email(self, linkedin_public_identifier: str) -> dict:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{self.base_url}/datastorage/person_contacts_lookup/work_emails/",
+                headers=self.headers,
+                json={"linkedin_public_identifier": linkedin_public_identifier}
             )
             response.raise_for_status()
             return response.json()
