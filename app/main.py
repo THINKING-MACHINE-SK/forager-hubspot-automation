@@ -20,7 +20,7 @@ async def company_webhook(request: Request):
     
     domain = body.get("propertyValue", "openai.com")
     
-    # Background service trigger karna
+    # Triggering Background services
     enrichment_service = EnrichmentService()
     await enrichment_service.enrich_company_and_contacts(domain)
     
