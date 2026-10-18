@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -23,11 +24,18 @@ def mock_hubspot(monkeypatch, handler):
 
 
 @pytest.mark.parametrize("duplicate", [False, True])
-def test_contact_creation_and_duplicate_skip(monkeypatch, duplicate):
+def test_contact_creation_and_duplicate_association(monkeypatch, duplicate):
     calls = []
 
     def handler(request):
         calls.append(request)
+        if request.url.path.endswith("/contacts/search"):
+            payload = json.loads(request.content)
+            assert payload["filterGroups"][0]["filters"] == [{
+                "propertyName": "email", "operator": "EQ",
+                "value": "jane+demo@example.com",
+            }]
+            return httpx.Response(200, json={"results": [{"id": "42"}]})
         if request.method == "POST":
             return httpx.Response(409 if duplicate else 201, json={"id": "42"})
         assert request.method == "PUT"
@@ -38,9 +46,9 @@ def test_contact_creation_and_duplicate_skip(monkeypatch, duplicate):
     contact_id = asyncio.run(
         client.create_contact("jane+demo@example.com", "Jane", "Doe", "7")
     )
-    assert contact_id == (None if duplicate else "42")
+    assert contact_id == "42"
     assert [call.method for call in calls] == (
-        ["POST"] if duplicate else ["POST", "PUT"]
+        ["POST", "POST", "PUT"] if duplicate else ["POST", "PUT"]
     )
 
 
@@ -65,7 +73,27 @@ def test_missing_contact_id_still_raises(monkeypatch):
         asyncio.run(client.create_contact("jane@example.com", "Jane", "Doe", "7"))
 
 
-def test_repeated_webhook_skips_duplicate_and_finishes_pipeline(monkeypatch):
+@pytest.mark.parametrize("search_status,search_body,error_type", [
+    (200, {"results": []}, ValueError),
+    (200, {"results": [{}]}, ValueError),
+    (403, {}, httpx.HTTPStatusError),
+    (429, {}, httpx.HTTPStatusError),
+])
+def test_duplicate_lookup_failure_does_not_report_success(
+    monkeypatch, search_status, search_body, error_type,
+):
+    def handler(request):
+        assert request.method == "POST"
+        if request.url.path.endswith("/search"):
+            return httpx.Response(search_status, json=search_body)
+        return httpx.Response(409)
+
+    client = mock_hubspot(monkeypatch, handler)
+    with pytest.raises(error_type):
+        asyncio.run(client.create_contact("jane@example.com", "Jane", "Doe", "7"))
+
+
+def test_repeated_webhook_associates_duplicates_and_finishes_pipeline(monkeypatch):
     from app import main
 
     contacts = set()
@@ -74,9 +102,11 @@ def test_repeated_webhook_skips_duplicate_and_finishes_pipeline(monkeypatch):
     def handler(request):
         if request.method == "POST" and request.url.path.endswith("/companies"):
             return httpx.Response(201, json={"id": "7"})
+        if request.url.path.endswith("/contacts/search"):
+            email = json.loads(request.content)["filterGroups"][0]["filters"][0]["value"]
+            assert email in contacts
+            return httpx.Response(200, json={"results": [{"id": email}]})
         if request.method == "POST":
-            import json
-
             email = json.loads(request.content)["properties"]["email"]
             if email in contacts:
                 return httpx.Response(409)
@@ -109,4 +139,4 @@ def test_repeated_webhook_skips_duplicate_and_finishes_pipeline(monkeypatch):
             assert response.status_code == 200
             assert response.json()["received"] is True
     assert contacts == {"jane.doe.0@example.com", "jane.doe.1@example.com"}
-    assert len(associated) == 2
+    assert len(associated) == 4

@@ -37,8 +37,8 @@ class HubSpotClient:
         firstname: str,
         lastname: str,
         company_id: str | None = None,
-    ) -> str | None:
-        """Create a contact, skipping creation and association on duplicate email."""
+    ) -> str:
+        """Create or find a contact and associate it with the supplied company."""
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 f"{self.BASE_URL}/crm/v3/objects/contacts",
@@ -54,12 +54,34 @@ class HubSpotClient:
             if response.status_code == 409:
                 print(
                     f"Contact with email {email} already exists (409 Conflict). "
-                    "Skipping creation.",
+                    "Fetching existing contact ID...",
                     flush=True,
                 )
-                return None
-            response.raise_for_status()
-            contact_id = response.json().get("id")
+                response = await client.post(
+                    f"{self.BASE_URL}/crm/v3/objects/contacts/search",
+                    headers=self.headers,
+                    json={
+                        "filterGroups": [{
+                            "filters": [{
+                                "propertyName": "email",
+                                "operator": "EQ",
+                                "value": email,
+                            }],
+                        }],
+                        "limit": 1,
+                    },
+                )
+                response.raise_for_status()
+                results = response.json().get("results", [])
+                if not results:
+                    raise ValueError(
+                        "HubSpot reported a duplicate contact, but email search "
+                        "returned no matching contact"
+                    )
+                contact_id = results[0].get("id")
+            else:
+                response.raise_for_status()
+                contact_id = response.json().get("id")
             if not contact_id:
                 raise ValueError("HubSpot contact response did not include an ID")
 
