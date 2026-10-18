@@ -70,10 +70,10 @@ class EnrichmentService:
                     },
                 ]
 
-            for person in top_contacts:
-                firstname = person.get("first_name", "Valued")
-                lastname = person.get("last_name", "Contact")
-                email = f"{firstname.lower()}.{lastname.lower()}@{domain}".replace(" ", "")
+            for idx, person in enumerate(top_contacts):
+                firstname = person.get("first_name") or "User"
+                lastname = person.get("last_name") or str(idx)
+                email = f"{firstname.lower()}.{lastname.lower()}.{idx}@{domain}".replace(" ", "")
 
                 if company_id:
                     await self.hubspot_client.create_contact(

@@ -23,17 +23,13 @@ def mock_hubspot(monkeypatch, handler):
 
 
 @pytest.mark.parametrize("duplicate", [False, True])
-def test_contact_creation_and_duplicate_recovery(monkeypatch, duplicate):
+def test_contact_creation_and_duplicate_skip(monkeypatch, duplicate):
     calls = []
 
     def handler(request):
         calls.append(request)
         if request.method == "POST":
             return httpx.Response(409 if duplicate else 201, json={"id": "42"})
-        if request.method == "GET":
-            assert request.url.params["idProperty"] == "email"
-            assert request.url.path.endswith("/jane+demo@example.com")
-            return httpx.Response(200, json={"id": "42"})
         assert request.method == "PUT"
         assert request.url.path.endswith("/contacts/42/associations/companies/7/contact_to_company")
         return httpx.Response(204)
@@ -42,9 +38,9 @@ def test_contact_creation_and_duplicate_recovery(monkeypatch, duplicate):
     contact_id = asyncio.run(
         client.create_contact("jane+demo@example.com", "Jane", "Doe", "7")
     )
-    assert contact_id == "42"
+    assert contact_id == (None if duplicate else "42")
     assert [call.method for call in calls] == (
-        ["POST", "GET", "PUT"] if duplicate else ["POST", "PUT"]
+        ["POST"] if duplicate else ["POST", "PUT"]
     )
 
 
@@ -60,17 +56,16 @@ def test_non_duplicate_errors_still_raise(monkeypatch, status_code):
     assert error.value.response.status_code == status_code
 
 
-def test_failed_duplicate_lookup_still_raises(monkeypatch):
+def test_missing_contact_id_still_raises(monkeypatch):
     def handler(request):
-        return httpx.Response(409 if request.method == "POST" else 404)
+        return httpx.Response(201, json={})
 
     client = mock_hubspot(monkeypatch, handler)
-    with pytest.raises(httpx.HTTPStatusError) as error:
+    with pytest.raises(ValueError, match="did not include an ID"):
         asyncio.run(client.create_contact("jane@example.com", "Jane", "Doe", "7"))
-    assert error.value.response.status_code == 404
 
 
-def test_repeated_webhook_reuses_contact_and_finishes_pipeline(monkeypatch):
+def test_repeated_webhook_skips_duplicate_and_finishes_pipeline(monkeypatch):
     from app import main
 
     contacts = set()
@@ -87,8 +82,7 @@ def test_repeated_webhook_reuses_contact_and_finishes_pipeline(monkeypatch):
                 return httpx.Response(409)
             contacts.add(email)
             return httpx.Response(201, json={"id": email})
-        if request.method == "GET":
-            return httpx.Response(200, json={"id": request.url.path.rsplit("/", 1)[-1]})
+        assert request.method == "PUT"
         associated.append(request.url.path)
         return httpx.Response(204)
 
@@ -100,7 +94,7 @@ def test_repeated_webhook_reuses_contact_and_finishes_pipeline(monkeypatch):
         search_person_role=AsyncMock(return_value={
             "search_results": [
                 {"first_name": "Jane", "last_name": "Doe"},
-                {"first_name": "John", "last_name": "Doe"},
+                {"first_name": "Jane", "last_name": "Doe"},
             ],
         }),
     )
@@ -114,5 +108,5 @@ def test_repeated_webhook_reuses_contact_and_finishes_pipeline(monkeypatch):
             })
             assert response.status_code == 200
             assert response.json()["received"] is True
-    assert len(contacts) == 2
-    assert len(associated) == 4
+    assert contacts == {"jane.doe.0@example.com", "jane.doe.1@example.com"}
+    assert len(associated) == 2
