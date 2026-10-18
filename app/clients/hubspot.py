@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import httpx
 
 from app.config import get_settings
@@ -38,6 +40,7 @@ class HubSpotClient:
         lastname: str,
         company_id: str | None = None,
     ) -> str:
+        """Create a contact, or reuse its existing record on duplicate email."""
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
                 f"{self.BASE_URL}/crm/v3/objects/contacts",
@@ -50,6 +53,14 @@ class HubSpotClient:
                     }
                 },
             )
+            if response.status_code == 409:
+                # Webhook retries may encounter a contact created by an earlier run.
+                # Resolve by email rather than parsing HubSpot's error message.
+                response = await client.get(
+                    f"{self.BASE_URL}/crm/v3/objects/contacts/{quote(email, safe='')}",
+                    headers=self.headers,
+                    params={"idProperty": "email", "properties": "email"},
+                )
             response.raise_for_status()
             contact_id = response.json().get("id")
             if not contact_id:
