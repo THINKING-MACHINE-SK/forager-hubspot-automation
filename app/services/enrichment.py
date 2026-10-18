@@ -39,7 +39,8 @@ class EnrichmentService:
                         search_response
                         if isinstance(search_response, list)
                         else (
-                            search_response.get("results")
+                            search_response.get("search_results")
+                            or search_response.get("results")
                             or search_response.get("data")
                             or search_response.get("items")
                             or []
